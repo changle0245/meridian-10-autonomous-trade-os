@@ -10,6 +10,7 @@ async function openWorkspace(page: Page, label: string, testId: string) {
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("从第一条线索，到最后一美元利润。")).toBeVisible();
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-ready", "true");
 });
 
 test("command center renders the complete synthetic boundary", async ({ page }) => {
