@@ -10,7 +10,7 @@ test("production health endpoint reports Level 10", async ({ request }) => {
   const response = await request.get("/api/health");
   expect(response.ok()).toBeTruthy();
   const body = await response.json();
-  expect(body.release).toBe("level-10-synthetic-demo");
+  expect(body.release).toBe("integrated-core-v1");
   expect(body.workflow).toBe("vercel-wdk");
 });
 

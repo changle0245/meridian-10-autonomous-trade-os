@@ -1,10 +1,10 @@
 # MERIDIAN 10 — Autonomous Trade OS
 
-A Level 10, end-to-end foreign-trade operations laboratory: synthetic lead discovery, evidence-backed due diligence, customer records, explainable lookalikes, quotation and margin controls, eight trade-document PDFs, durable order workflows, shipment updates, supplier scoring, versioned inventory, order-level profit, policy guardrails, and a tamper-evident audit trail.
+A Level 10 foreign-trade operations system with two explicit runtime modes: a public deterministic laboratory and an authenticated, organization-scoped PostgreSQL core. It covers lead intake, evidence-backed due diligence, customer records, quotation and margin controls, orders, atomic inventory, eight trade-document PDFs, durable workflows, shipment milestones, secure customer portals, supplier operations, order profit, policy guardrails, and a tamper-evident audit trail.
 
 **Live demo:** [meridian-10-autonomous-trade-os.vercel.app](https://meridian-10-autonomous-trade-os.vercel.app/)
 
-> Every company, contact, supplier, order, event and financial figure is deterministic fictional data. The system does not scrape real personal data, send outreach, place orders, file customs declarations, instruct carriers, or move money. Customs and origin documents are watermarked drafts requiring licensed professional review.
+> The public deployment defaults to deterministic fictional data. Database mode supports shared operational records, but all external effects remain deliberately held as drafts: the system does not autonomously send outreach, place purchase orders, file customs declarations, instruct carriers, or move money. Customs and origin documents are controlled drafts requiring licensed professional review.
 
 ## What the test covers
 
@@ -16,28 +16,39 @@ A Level 10, end-to-end foreign-trade operations laboratory: synthetic lead disco
 6. Lookalike discovery — explainable product, industry, channel, size and region similarity.
 7. Profit and expenses — landed cost, FX, freight, duty, commission, bank fees, overhead and scenario stress tests.
 8. Supplier and inventory operations — weighted scorecards, atomic reservations, idempotency, optimistic concurrency and oversell protection.
-9. Additional controls — durable workflows, protected daily cron, command palette, IndexedDB journal, cross-tab sync, snapshot recovery, policy-as-code and hash-chain verification.
+9. Additional controls — durable workflows, protected daily cron, organization RBAC, Inbox/Outbox, idempotency records, command palette, fixture-mode IndexedDB recovery, policy-as-code and hash-chain verification.
+
+## Runtime modes
+
+| Mode | Data and identity | Intended use |
+|---|---|---|
+| `fixture` (default) | Deterministic synthetic records, demo identity, IndexedDB browser journal | Public evaluation with no credentials and no real-world effects |
+| `database` | Neon-compatible PostgreSQL, Clerk organization identity, server-derived tenant scope | Shared authenticated operations with atomic writes and controlled drafts |
+
+Database mode fails closed when its database or identity configuration is incomplete. The browser never supplies a trusted tenant identifier.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  UI["Next.js 16 operations UI"] --> API["Typed route handlers"]
-  UI --> IDB["IndexedDB versioned browser journal"]
-  API --> DOMAIN["Pure trade-domain engine"]
-  API --> PDF["Watermarked PDF factory"]
+  IDP["Clerk organization identity"] --> UI["Next.js 16 operations UI"]
+  UI --> API["Authenticated route handlers"]
+  API --> PG["PostgreSQL transactional core"]
+  PG --> AUDIT["Append-only hash chain"]
+  PG --> IO["Inbox / held Outbox / idempotency"]
+  API --> PDF["Controlled PDF factory"]
   API --> WDK["Vercel Workflow DevKit"]
-  CRON["Protected daily cron"] --> DOMAIN
-  WDK --> STEPS["8 durable order steps"]
-  DOMAIN --> AUDIT["Append-only hash-chain events"]
-  DOMAIN --> FIXTURES["Deterministic synthetic fixtures"]
+  WDK --> PG
+  PORTAL["Hashed-token customer portal"] --> PG
+  UI -. fixture mode .-> IDB["IndexedDB journal"]
+  IDB --> FIXTURES["Deterministic fixtures"]
 ```
 
-The public laboratory intentionally uses a local browser journal instead of pretending to be a shared multi-user ERP. A production conversion requires authenticated tenancy, a shared transactional database, managed secrets, verified external data contracts, role-based approvals and licensed compliance owners. See [Architecture](docs/ARCHITECTURE.md), [Threat model](docs/THREAT-MODEL.md) and [Runbook](docs/RUNBOOK.md).
+The integrated core enforces organization scope, role checks, atomic stock and order transactions, idempotent retries, audit-chain continuity, held customer-update drafts, and hashed portal tokens. See [Architecture](docs/ARCHITECTURE.md), [integration blueprint](docs/INTEGRATION-BLUEPRINT.md), [threat model](docs/THREAT-MODEL.md) and [runbook](docs/RUNBOOK.md).
 
 ## Run locally
 
-Requirements: Node.js 22+ and npm.
+Requirements: Node.js 24 and npm.
 
 ```bash
 npm ci
@@ -45,6 +56,16 @@ npm run dev
 ```
 
 Open `http://localhost:3000`. No external account or production credential is required for the synthetic demo.
+
+To activate shared mode, copy `.env.example`, configure a PostgreSQL database and Clerk organization application, generate a 32+ character `PORTAL_TOKEN_SECRET`, then run:
+
+```bash
+npm run db:migrate
+npm run db:seed:demo # optional deterministic onboarding dataset
+DATA_MODE=database AUTH_MODE=clerk npm run dev
+```
+
+Keep `OUTBOUND_MODE=draft`. Database mode does not imply permission to contact customers or execute trade, payment, carrier, or customs actions.
 
 ## Verification
 
@@ -63,13 +84,13 @@ Public deployment verification:
 PLAYWRIGHT_BASE_URL=https://meridian-10-autonomous-trade-os.vercel.app npm run test:public
 ```
 
-The automated suites cover domain invariants, API contracts, PDF signatures and watermarks, workflow steps, 15 operator workspaces, the redacted customer portal, desktop Chromium, mobile WebKit and public runtime behavior. See [Test matrix](docs/TEST-MATRIX.md).
+The automated suites also run migrations against a fresh in-process PostgreSQL engine and verify atomic inventory, order intake, milestone transitions, portal rotation, tenant isolation, idempotency, audit/outbox side effects, database document projection and shared workspace hydration. See [Test matrix](docs/TEST-MATRIX.md).
 
 ## Safe extension points
 
 - Replace synthetic acquisition sources only through explicit, lawful provider contracts with provenance and rate limits.
 - Put real outreach behind per-tenant approval policies, suppression lists and auditable drafts.
-- Replace browser persistence with transactional storage while retaining idempotency keys and optimistic versions.
+- Connect contracted acquisition, screening, communications, logistics and accounting providers through the existing Inbox/held-Outbox boundary.
 - Send real documents only after legal, customs, tax and banking review gates.
 - Keep risk screening results as evidence-backed decisions with appeal and human-review paths.
 

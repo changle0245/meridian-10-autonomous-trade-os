@@ -24,8 +24,7 @@ describe("trade document factory", () => {
     expect(isDocumentType(type)).toBe(false);
   });
 
-  it("falls back to a known fixture order without failing", async () => {
-    const bytes = await generateTradeDocument("quotation", "SO-MISSING");
-    expect(bytes.byteLength).toBeGreaterThan(2_500);
+  it("rejects an unknown order instead of leaking a fallback document", async () => {
+    await expect(generateTradeDocument("quotation", "SO-MISSING")).rejects.toThrow(/Unknown order/);
   });
 });
