@@ -1,7 +1,15 @@
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { customers, orders, products, quotes } from "./seed";
 import { calculateQuote } from "./commerce";
-import type { DocumentType, QuoteInput, TradeOrder } from "./types";
+import type { Customer, DocumentType, Product, QuoteInput, TradeOrder } from "./types";
+
+export interface TradeDocumentSnapshot {
+  order: TradeOrder;
+  quote: QuoteInput;
+  customer: Customer;
+  products: Product[];
+  synthetic: boolean;
+}
 
 const BRAND = rgb(0.08, 0.18, 0.25);
 const ACCENT = rgb(0.03, 0.62, 0.47);
@@ -49,7 +57,7 @@ function wrap(text: string, maxChars: number): string[] {
   return lines;
 }
 
-function drawHeader(page: PDFPage, bold: PDFFont, regular: PDFFont, type: DocumentType, number: string) {
+function drawHeader(page: PDFPage, bold: PDFFont, regular: PDFFont, type: DocumentType, number: string, synthetic: boolean) {
   const { width, height } = page.getSize();
   const label = documentLabels[type];
   const labelSize = Math.min(13, 205 / bold.widthOfTextAtSize(label, 1));
@@ -57,10 +65,10 @@ function drawHeader(page: PDFPage, bold: PDFFont, regular: PDFFont, type: Docume
   const labelX = width - 44 - labelWidth;
   page.drawRectangle({ x: 0, y: height - 116, width, height: 116, color: BRAND });
   page.drawText("MERIDIAN INDUSTRIAL EXPORTS", { x: 44, y: height - 54, size: 14.5, font: bold, color: rgb(1, 1, 1) });
-  page.drawText("Synthetic demonstration exporter | Ningbo, China", { x: 44, y: height - 75, size: 9, font: regular, color: rgb(0.77, 0.86, 0.88) });
+  page.drawText(synthetic ? "Synthetic demonstration exporter | Ningbo, China" : "Controlled trade-document workspace | Professional review required", { x: 44, y: height - 75, size: 9, font: regular, color: rgb(0.77, 0.86, 0.88) });
   page.drawText(label, { x: labelX, y: height - 54, size: labelSize, font: bold, color: rgb(1, 1, 1) });
   page.drawText(number, { x: labelX, y: height - 76, size: 10, font: regular, color: rgb(0.77, 0.86, 0.88) });
-  page.drawText("SYNTHETIC DEMO - NOT FOR FILING", { x: 148, y: height / 2, size: 32, font: bold, color: rgb(0.92, 0.92, 0.92), rotate: degrees(38), opacity: 0.34 });
+  page.drawText(synthetic ? "SYNTHETIC DEMO - NOT FOR FILING" : "CONTROLLED DRAFT - NOT FOR FILING", { x: synthetic ? 148 : 118, y: height / 2, size: 32, font: bold, color: rgb(0.92, 0.92, 0.92), rotate: degrees(38), opacity: 0.34 });
 }
 
 function drawFooter(page: PDFPage, regular: PDFFont, pageNumber: number) {
@@ -69,8 +77,7 @@ function drawFooter(page: PDFPage, regular: PDFFont, pageNumber: number) {
   page.drawText(`Page ${pageNumber}`, { x: 518, y: 26, size: 7.4, font: regular, color: MUTED });
 }
 
-function drawPartyBlock(page: PDFPage, regular: PDFFont, bold: PDFFont, order: TradeOrder, y: number) {
-  const customer = customers.find((item) => item.id === order.customerId) ?? customers[0];
+function drawPartyBlock(page: PDFPage, regular: PDFFont, bold: PDFFont, order: TradeOrder, customer: Customer, y: number) {
   page.drawText("EXPORTER", { x: 44, y, size: 8, font: bold, color: ACCENT });
   page.drawText("Meridian Industrial Exports (Synthetic)", { x: 44, y: y - 18, size: 10.5, font: bold, color: BRAND });
   page.drawText("88 Harbor Innovation Road, Ningbo, China", { x: 44, y: y - 34, size: 8.5, font: regular, color: MUTED });
@@ -95,7 +102,7 @@ function drawSummary(page: PDFPage, regular: PDFFont, bold: PDFFont, order: Trad
   });
 }
 
-function drawLineTable(page: PDFPage, regular: PDFFont, bold: PDFFont, quote: QuoteInput, y: number, packing = false) {
+function drawLineTable(page: PDFPage, regular: PDFFont, bold: PDFFont, quote: QuoteInput, catalog: Product[], y: number, packing = false) {
   const headers = packing ? ["SKU / DESCRIPTION", "QTY", "CARTONS", "NET KG", "GROSS KG"] : ["SKU / DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"];
   const widths = packing ? [230, 60, 70, 72, 75] : [275, 62, 84, 86];
   page.drawRectangle({ x: 44, y: y - 21, width: 507, height: 24, color: BRAND });
@@ -106,7 +113,7 @@ function drawLineTable(page: PDFPage, regular: PDFFont, bold: PDFFont, quote: Qu
   });
   let cursor = y - 45;
   quote.lines.forEach((line, index) => {
-    const product = products.find((item) => item.sku === line.sku)!;
+    const product = catalog.find((item) => item.sku === line.sku)!;
     if (index % 2 === 0) page.drawRectangle({ x: 44, y: cursor - 10, width: 507, height: 27, color: rgb(0.97, 0.98, 0.98) });
     page.drawText(`${line.sku} | ${product.name}`, { x: 52, y: cursor, size: 8, font: regular, color: BRAND, maxWidth: packing ? 220 : 265 });
     if (packing) {
@@ -145,9 +152,9 @@ function drawTotals(page: PDFPage, regular: PDFFont, bold: PDFFont, quote: Quote
   page.drawText(`Margin policy: ${result.guardrail} | Validity: 14 days | Payment subject to final approval`, { x: 44, y: y - 80, size: 8, font: regular, color: result.guardrail === "BLOCK" ? RED : MUTED });
 }
 
-function drawCustoms(page: PDFPage, regular: PDFFont, bold: PDFFont, quote: QuoteInput, order: TradeOrder, y: number) {
+function drawCustoms(page: PDFPage, regular: PDFFont, bold: PDFFont, quote: QuoteInput, order: TradeOrder, catalog: Product[], y: number) {
   const rows = quote.lines.map((line) => {
-    const product = products.find((item) => item.sku === line.sku)!;
+    const product = catalog.find((item) => item.sku === line.sku)!;
     return [product.hsCode, product.name, "CN", String(line.quantity), (line.quantity * product.weightKg).toFixed(1), money(line.quantity * line.unitPrice, quote.currency)];
   });
   const headers = ["HS CODE", "DESCRIPTION", "ORIGIN", "QTY", "NET KG", "VALUE"];
@@ -165,8 +172,7 @@ function drawCustoms(page: PDFPage, regular: PDFFont, bold: PDFFont, quote: Quot
   page.drawText("DECLARATION STATUS: DRAFT. An authorized customs broker must verify classification, origin, value and filing data.", { x: 44, y: y - 184, size: 8.2, font: bold, color: RED, maxWidth: 500 });
 }
 
-function drawOrigin(page: PDFPage, regular: PDFFont, bold: PDFFont, quote: QuoteInput, order: TradeOrder, y: number) {
-  const customer = customers.find((item) => item.id === order.customerId) ?? customers[0];
+function drawOrigin(page: PDFPage, regular: PDFFont, bold: PDFFont, quote: QuoteInput, order: TradeOrder, customer: Customer, y: number) {
   const fields = [
     ["Exporter", "Meridian Industrial Exports (Synthetic), Ningbo, China"],
     ["Consignee", `${customer.company}, ${order.destination}`],
@@ -200,8 +206,15 @@ function drawShippingUpdate(page: PDFPage, regular: PDFFont, bold: PDFFont, orde
 }
 
 export async function generateTradeDocument(type: DocumentType, orderId = "SO-260731"): Promise<Uint8Array> {
-  const order = orders.find((item) => item.id === orderId) ?? orders[0];
+  const order = orders.find((item) => item.id === orderId);
+  if (!order) throw new Error(`Unknown order: ${orderId}`);
   const quote = quotes.find((item) => item.id === order.quoteId) ?? quotes[0];
+  const customer = customers.find((item) => item.id === order.customerId) ?? customers[0];
+  return generateTradeDocumentFromSnapshot(type, { order, quote, customer, products, synthetic: true });
+}
+
+export async function generateTradeDocumentFromSnapshot(type: DocumentType, snapshot: TradeDocumentSnapshot): Promise<Uint8Array> {
+  const { order, quote, customer, products: catalog, synthetic } = snapshot;
   const pdf = await PDFDocument.create();
   pdf.setTitle(`${documentLabels[type]} ${documentNumbers[type](order)}`);
   pdf.setAuthor("MERIDIAN 10 Autonomous Trade OS");
@@ -212,22 +225,22 @@ export async function generateTradeDocument(type: DocumentType, orderId = "SO-26
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const page = pdf.addPage([595.28, 841.89]);
   page.drawRectangle({ x: 0, y: 0, width: 595.28, height: 841.89, color: rgb(1, 1, 1) });
-  drawHeader(page, bold, regular, type, documentNumbers[type](order));
-  drawPartyBlock(page, regular, bold, order, 690);
+  drawHeader(page, bold, regular, type, documentNumbers[type](order), synthetic);
+  drawPartyBlock(page, regular, bold, order, customer, 690);
   drawSummary(page, regular, bold, order, 612);
 
   if (type === "packing-list") {
-    const cursor = drawLineTable(page, regular, bold, quote, 515, true);
+    const cursor = drawLineTable(page, regular, bold, quote, catalog, 515, true);
     page.drawText("Packaging declaration", { x: 44, y: cursor - 12, size: 9, font: bold, color: ACCENT });
     page.drawText("Export cartons on heat-treated synthetic pallets. Final weights require warehouse scale tickets.", { x: 44, y: cursor - 30, size: 8.2, font: regular, color: MUTED });
   } else if (type === "customs-draft") {
-    drawCustoms(page, regular, bold, quote, order, 515);
+    drawCustoms(page, regular, bold, quote, order, catalog, 515);
   } else if (type === "origin-draft") {
-    drawOrigin(page, regular, bold, quote, order, 515);
+    drawOrigin(page, regular, bold, quote, order, customer, 515);
   } else if (type === "shipping-update") {
     drawShippingUpdate(page, regular, bold, order, 515);
   } else {
-    const cursor = drawLineTable(page, regular, bold, quote, 515);
+    const cursor = drawLineTable(page, regular, bold, quote, catalog, 515);
     drawTotals(page, regular, bold, quote, cursor - 10);
     const label = type === "purchase-order" ? "PURCHASE CONDITIONS" : "COMMERCIAL TERMS";
     page.drawText(label, { x: 44, y: cursor - 18, size: 8, font: bold, color: ACCENT });

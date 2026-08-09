@@ -7,7 +7,7 @@ import { calculateProfit, calculateQuote, inventoryHealth, reserveInventory, str
 import { documentLabels } from "@/domain/documents";
 import { findSimilarCustomers } from "@/domain/scoring";
 import { createSeedState } from "@/domain/seed";
-import type { AutomationRun, DocumentType, WorkspaceState } from "@/domain/types";
+import type { AutomationRun, DocumentType, OrderStage, WorkspaceState } from "@/domain/types";
 import { clearWorkspace, exportWorkspace, loadWorkspace, parseWorkspace, saveWorkspace } from "@/lib/workspace-store";
 
 type ViewId = "command" | "leads" | "research" | "customers" | "lookalike" | "pipeline" | "quotes" | "documents" | "fulfillment" | "suppliers" | "inventory" | "finance" | "compliance" | "automations" | "audit";
@@ -37,6 +37,8 @@ interface ViewProps {
   setState: React.Dispatch<React.SetStateAction<WorkspaceState>>;
   notify: (message: string, tone?: "good" | "warn" | "bad") => void;
   navigate: (view: ViewId) => void;
+  runtimeMode: "fixture" | "database";
+  auditLinked: boolean;
 }
 
 function StatusPill({ children, tone = "neutral" }: { children: ReactNode; tone?: "good" | "warn" | "bad" | "neutral" | "info" }) {
@@ -52,10 +54,10 @@ function Panel({ title, eyebrow, action, children, className = "" }: { title: st
 }
 
 function Bar({ value, tone = "green" }: { value: number; tone?: "green" | "amber" | "red" | "blue" }) {
-  return <div className="bar-track" aria-label={`${value}%`}><span className={tone} style={{ width: `${Math.max(2, Math.min(100, value))}%` }} /></div>;
+  return <div className="bar-track" role="progressbar" aria-label={`${value}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}><span className={tone} style={{ width: `${Math.max(2, Math.min(100, value))}%` }} /></div>;
 }
 
-function CommandCenter({ state, navigate }: ViewProps) {
+function CommandCenter({ state, navigate, runtimeMode }: ViewProps) {
   const quoted = state.quotes.map(calculateQuote);
   const pipeline = state.orders.reduce((sum, order) => sum + order.amountUsd, 0);
   const net = state.ledgers.map(calculateProfit).reduce((sum, result) => sum + result.netProfitUsd, 0);
@@ -67,10 +69,10 @@ function CommandCenter({ state, navigate }: ViewProps) {
       <div className="hero-copy">
         <div className="eyebrow">LEVEL 10 · AUTONOMOUS TRADE OPERATIONS</div>
         <h1>从第一条线索，到最后一美元利润。</h1>
-        <p>一条可追溯、可重放、带合规护栏的外贸自治链路。所有公司、联系人和交易均为确定性虚构数据。</p>
+        <p>一条可追溯、可重放、带合规护栏的外贸自治链路。{runtimeMode === "fixture" ? "所有公司、联系人和交易均为确定性虚构数据。" : "当前数据来自登录组织的共享数据库。"}</p>
         <div className="hero-actions"><button className="primary" onClick={() => navigate("leads")}>启动获客雷达</button><button className="secondary" onClick={() => navigate("fulfillment")}>查看交付控制塔</button></div>
       </div>
-      <div className="autonomy-orbit" aria-label="自治闭环">
+      <div className="autonomy-orbit" role="img" aria-label="自治闭环：获客、背调、报价、交付和利润">
         <div className="orbit-center"><strong>MERIDIAN</strong><span>15 工作区</span></div>
         <span className="orbit-node n1">获客</span><span className="orbit-node n2">背调</span><span className="orbit-node n3">报价</span><span className="orbit-node n4">交付</span><span className="orbit-node n5">利润</span>
       </div>
@@ -104,11 +106,15 @@ function CommandCenter({ state, navigate }: ViewProps) {
   </div>;
 }
 
-function LeadsView({ state, setState, notify, navigate }: ViewProps) {
+function LeadsView({ state, setState, notify, navigate, runtimeMode }: ViewProps) {
   const [running, startTransition] = useTransition();
   const [filter, setFilter] = useState("ALL");
   const visible = state.leads.filter((lead) => filter === "ALL" || (filter === "HIGH" ? lead.score >= 80 : lead.region === filter));
   const discover = () => startTransition(() => {
+    if (runtimeMode === "database") {
+      notify("共享模式未配置真实获客数据源；系统没有用虚构扫描污染组织数据库", "warn");
+      return;
+    }
     const result = runLeadDiscovery(state.leads);
     setState((current) => ({ ...current, leads: result.leads, automations: [result.run, ...current.automations], events: appendEvent(current.events, { id: `EVT-${String(current.events.length + 1).padStart(4, "0")}`, tenantId: current.tenantId, at: "2026-08-09T10:00:09.000Z", actor: "Lead Radar Agent", action: "LEADS_DISCOVERED", entity: "lead-batch", entityId: result.run.id, payload: { added: result.added.length, realPeopleContacted: 0 } }), updatedAt: "2026-08-09T10:00:09.000Z" }));
     notify(result.added.length ? `已发现并评分 ${result.added.length} 个全新合成客户` : "实体解析完成：没有创建重复线索", "good");
@@ -204,42 +210,120 @@ function QuotesView({ state }: ViewProps) {
   </div>;
 }
 
-function DocumentsView({ state }: ViewProps) {
+function DocumentsView({ state, runtimeMode }: ViewProps) {
   const [orderId, setOrderId] = useState(state.orders[0].id);
   const docs = Object.entries(documentLabels) as [DocumentType, string][];
-  return <div className="workspace-stack" data-testid="documents-view"><div className="page-intro"><div><div className="eyebrow">EIGHT DOCUMENTS · ONE DATA THREAD</div><h1>国际贸易单证工厂</h1><p>同一订单数据生成报价、发票、采购、装箱、报关、原产地和交付报告；所有 PDF 带演示水印。</p></div><select value={orderId} onChange={(event) => setOrderId(event.target.value)}>{state.orders.map((order) => <option value={order.id} key={order.id}>{order.id} · {order.destination}</option>)}</select></div>
+  return <div className="workspace-stack" data-testid="documents-view"><div className="page-intro"><div><div className="eyebrow">EIGHT DOCUMENTS · ONE DATA THREAD</div><h1>国际贸易单证工厂</h1><p>同一订单数据生成报价、发票、采购、装箱、报关、原产地和交付报告；所有 PDF 带{runtimeMode === "fixture" ? "演示" : "受控草稿"}水印。</p></div><select value={orderId} onChange={(event) => setOrderId(event.target.value)}>{state.orders.map((order) => <option value={order.id} key={order.id}>{order.id} · {order.destination}</option>)}</select></div>
     <div className="document-grid">{docs.map(([type, label], index) => <article key={type}><div className="document-preview"><span className="doc-fold" /><div className="doc-brand">MERIDIAN</div><div className="doc-title">{label}</div><div className="doc-lines"><i /><i /><i /><i /></div><strong>{String(index + 1).padStart(2, "0")}</strong></div><div className="doc-meta"><h3>{label}</h3><p>{type.includes("draft") ? "需专业复核的草案" : "由订单数字线程生成"}</p><a className="secondary full center" href={`/api/documents/${type}?order=${orderId}`} target="_blank" rel="noreferrer">生成并打开 PDF</a></div></article>)}</div><div className="alert-box info"><strong>一致性规则</strong><span>客户、币种、贸易术语、数量、金额、HS 编码和交付信息来自同一个版本化订单；报关与原产地单证始终标注 DRAFT。</span></div></div>;
 }
 
-function FulfillmentView({ state, setState, notify }: ViewProps) {
+function FulfillmentView({ state, setState, notify, runtimeMode }: ViewProps) {
   const [orderId, setOrderId] = useState(state.orders[0].id);
   const [workflowRun, setWorkflowRun] = useState<string>("");
+  const [workflowDryRun, setWorkflowDryRun] = useState(true);
+  const [portalLink, setPortalLink] = useState<{ url: string; expiresAt: string | null } | null>(null);
   const [launching, startTransition] = useTransition();
+  const [advancing, startMilestoneTransition] = useTransition();
+  const [issuingPortal, startPortalTransition] = useTransition();
+  const milestoneReplay = useRef<{ orderId: string; requestId: string } | null>(null);
+  const portalReplay = useRef<{ orderId: string; requestId: string } | null>(null);
   const order = state.orders.find((item) => item.id === orderId) ?? state.orders[0];
   const customer = state.customers.find((item) => item.id === order.customerId)!;
-  const advance = () => setState((current) => {
-    const selected = current.orders.find((item) => item.id === orderId)!;
-    const currentIndex = selected.milestones.findIndex((item) => item.status === "CURRENT");
-    if (currentIndex < 0 || currentIndex === selected.milestones.length - 1) { notify("该订单已经完成全部里程碑", "good"); return current; }
-    const milestones = selected.milestones.map((item, index) => index === currentIndex ? { ...item, status: "DONE" as const, actualAt: "2026-08-09T10:30:00.000Z" } : index === currentIndex + 1 ? { ...item, status: "CURRENT" as const } : item);
-    const orders = current.orders.map((item) => item.id === orderId ? { ...item, milestones } : item);
-    notify(`已完成 ${selected.milestones[currentIndex].label}，下一节点已激活`, "good");
-    return { ...current, orders, events: appendEvent(current.events, { id: `EVT-${String(current.events.length + 1).padStart(4, "0")}`, tenantId: current.tenantId, at: "2026-08-09T10:30:00.000Z", actor: "Fulfillment Agent", action: "MILESTONE_ADVANCED", entity: "order", entityId: orderId, payload: { completed: selected.milestones[currentIndex].label, next: selected.milestones[currentIndex + 1].label, customerDelivery: "draft-only" } }), updatedAt: "2026-08-09T10:30:00.000Z" };
-  });
+  const advance = () => {
+    if (runtimeMode === "fixture") {
+      setState((current) => {
+        const selected = current.orders.find((item) => item.id === orderId)!;
+        const currentIndex = selected.milestones.findIndex((item) => item.status === "CURRENT");
+        if (currentIndex < 0 || currentIndex === selected.milestones.length - 1) { notify("该订单已经完成全部里程碑", "good"); return current; }
+        const milestones = selected.milestones.map((item, index) => index === currentIndex ? { ...item, status: "DONE" as const, actualAt: "2026-08-09T10:30:00.000Z" } : index === currentIndex + 1 ? { ...item, status: "CURRENT" as const } : item);
+        const orders = current.orders.map((item) => item.id === orderId ? { ...item, milestones } : item);
+        notify(`已完成 ${selected.milestones[currentIndex].label}，下一节点已激活`, "good");
+        return { ...current, orders, events: appendEvent(current.events, { id: `EVT-${String(current.events.length + 1).padStart(4, "0")}`, tenantId: current.tenantId, at: "2026-08-09T10:30:00.000Z", actor: "Fulfillment Agent", action: "MILESTONE_ADVANCED", entity: "order", entityId: orderId, payload: { completed: selected.milestones[currentIndex].label, next: selected.milestones[currentIndex + 1].label, customerDelivery: "draft-only" } }), updatedAt: "2026-08-09T10:30:00.000Z" };
+      });
+      return;
+    }
+
+    startMilestoneTransition(async () => {
+      try {
+        if (!milestoneReplay.current || milestoneReplay.current.orderId !== orderId) {
+          milestoneReplay.current = { orderId, requestId: `REQ-MILESTONE-${crypto.randomUUID()}` };
+        }
+        const response = await fetch("/api/shipments/milestones/advance", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(milestoneReplay.current),
+        });
+        const body = await response.json() as {
+          status?: string;
+          completedMilestoneId?: string | null;
+          nextMilestoneId?: string | null;
+          orderStage?: OrderStage | null;
+          reason?: string;
+          error?: { message?: string } | string;
+        };
+        if (!response.ok || !body.completedMilestoneId) {
+          throw new Error(typeof body.error === "string" ? body.error : body.error?.message ?? body.reason ?? "里程碑推进失败");
+        }
+        const completedAt = new Date().toISOString();
+        setState((current) => ({
+          ...current,
+          orders: current.orders.map((item) => item.id !== orderId ? item : {
+            ...item,
+            stage: body.orderStage ?? item.stage,
+            milestones: item.milestones.map((milestone) => milestone.id === body.completedMilestoneId
+              ? { ...milestone, status: "DONE" as const, actualAt: completedAt }
+              : milestone.id === body.nextMilestoneId ? { ...milestone, status: "CURRENT" as const } : milestone),
+          }),
+          updatedAt: completedAt,
+        }));
+        milestoneReplay.current = null;
+        notify(body.status === "COMPLETED" ? "订单全部交付节点已完成" : "节点已原子推进；客户进度只进入待发送草稿箱", "good");
+      } catch (error) {
+        notify(error instanceof Error ? error.message : "里程碑推进失败", "bad");
+      }
+    });
+  };
   const launchWorkflow = () => startTransition(async () => {
     try {
-      const response = await fetch("/api/workflows/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orderId: order.id, tenantId: order.tenantId, customerId: order.customerId, dryRun: true }) });
-      const body = await response.json() as { runId?: string; error?: string };
-      if (!response.ok || !body.runId) throw new Error(body.error ?? "Workflow failed to queue");
+      const response = await fetch("/api/workflows/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orderId: order.id, dryRun: runtimeMode === "fixture" }) });
+      const body = await response.json() as { runId?: string; dryRun?: boolean; error?: string | { message?: string } };
+      if (!response.ok || !body.runId) throw new Error(typeof body.error === "string" ? body.error : body.error?.message ?? "Workflow failed to queue");
       setWorkflowRun(body.runId);
+      setWorkflowDryRun(body.dryRun ?? true);
       notify("耐久订单流程已进入 Vercel 队列", "good");
     } catch (error) { notify(error instanceof Error ? error.message : "工作流启动失败", "bad"); }
   });
-  return <div className="workspace-stack" data-testid="fulfillment-view"><div className="page-intro"><div><div className="eyebrow">DURABLE ORDER-TO-DELIVERY SAGA</div><h1>交付控制塔</h1><p>节点完成后自动生成客户进度草稿；Vercel 耐久流程把每一步持久化，重新部署后仍可继续。</p></div><div className="button-row"><select value={orderId} onChange={(event) => setOrderId(event.target.value)}>{state.orders.map((item) => <option value={item.id} key={item.id}>{item.id}</option>)}</select><button className="primary" onClick={launchWorkflow} disabled={launching}>{launching ? "正在排队…" : "启动耐久流程"}</button></div></div>
-    {workflowRun ? <div className="alert-box success"><strong>Workflow queued</strong><span>{workflowRun} · dry-run · Vercel WDK durable event log</span></div> : null}
+  const issuePortal = () => startPortalTransition(async () => {
+    try {
+      if (!portalReplay.current || portalReplay.current.orderId !== orderId) {
+        portalReplay.current = { orderId, requestId: `REQ-PORTAL-${crypto.randomUUID()}` };
+      }
+      const response = await fetch("/api/portal-grants", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...portalReplay.current, expiresInHours: 168 }),
+      });
+      const body = await response.json() as {
+        portalUrl?: string | null;
+        expiresAt?: string | null;
+        reason?: string;
+        error?: { message?: string } | string;
+      };
+      if (!response.ok || !body.portalUrl) {
+        throw new Error(typeof body.error === "string" ? body.error : body.error?.message ?? body.reason ?? "客户门户签发失败");
+      }
+      setPortalLink({ url: body.portalUrl, expiresAt: body.expiresAt ?? null });
+      portalReplay.current = null;
+      notify("客户门户链接已签发；旧链接已撤销，数据库仅保存令牌哈希", "good");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "客户门户签发失败", "bad");
+    }
+  });
+  return <div className="workspace-stack" data-testid="fulfillment-view"><div className="page-intro"><div><div className="eyebrow">DURABLE ORDER-TO-DELIVERY SAGA</div><h1>交付控制塔</h1><p>节点完成后自动生成客户进度草稿；Vercel 耐久流程把每一步持久化，重新部署后仍可继续。</p></div><div className="button-row"><select value={orderId} onChange={(event) => { setOrderId(event.target.value); setPortalLink(null); portalReplay.current = null; milestoneReplay.current = null; }}>{state.orders.map((item) => <option value={item.id} key={item.id}>{item.id}</option>)}</select><button className="primary" onClick={launchWorkflow} disabled={launching}>{launching ? "正在排队…" : "启动耐久流程"}</button></div></div>
+    {workflowRun ? <div className="alert-box success"><strong>Workflow queued</strong><span>{workflowRun} · {workflowDryRun ? "dry-run" : "controlled database execution"} · Vercel WDK durable event log</span></div> : null}
     <div className="fulfillment-hero"><div><span>{order.id} · {order.poNumber}</span><h2>{customer.company}</h2><p>{order.container} · {order.incoterm} · {order.destination}</p></div><div><span>订单金额</span><strong>{currency(order.amountUsd)}</strong></div><div><span>预计到港</span><strong>{order.eta}</strong></div><StatusPill tone="info">{order.stage.replaceAll("_", " ")}</StatusPill></div>
-    <div className="two-col wide-left"><Panel title="关键里程碑" eyebrow="EVIDENCE-ATTACHED TIMELINE" action={<button className="secondary" onClick={advance}>推进当前节点</button>}><div className="milestone-list">{order.milestones.map((item) => <article className={item.status.toLowerCase()} key={item.id}><span className="milestone-dot" /><div><h3>{item.label}</h3><p>{item.evidence}</p><small>{item.owner} · planned {item.plannedAt}{item.actualAt ? ` · actual ${item.actualAt.slice(0, 10)}` : ""}</small></div><StatusPill tone={item.status === "DONE" ? "good" : item.status === "CURRENT" ? "warn" : "neutral"}>{item.status}</StatusPill></article>)}</div></Panel>
-      <div className="workspace-stack"><Panel title="客户进度稿" eyebrow="SAFE EXTERNAL VIEW"><div className="message-card"><div className="message-to"><span>TO</span><strong>{customer.company}</strong><StatusPill tone="warn">DRAFT ONLY</StatusPill></div><p>Dear partner, your order <strong>{order.id}</strong> is progressing as planned. The latest milestone is <strong>{order.milestones.find((item) => item.status === "CURRENT")?.label}</strong>. Current estimated arrival remains <strong>{order.eta}</strong>.</p><div className="redaction-note">✓ Supplier costs, internal margin and risk notes removed</div><a className="secondary full center" href="/portal/demo-nordwerk" target="_blank">打开客户门户预览</a></div></Panel><Panel title="异常雷达" eyebrow="EXCEPTION-FIRST"><div className="exception-list"><div><span className="risk-dot medium" /><div><strong>舱位缓冲缩短</strong><small>当前仍在 SLA 内，无需升级</small></div><b>WATCH</b></div><div><span className="risk-dot low" /><div><strong>质量证据完整</strong><small>AQL 夹具与箱唛记录一致</small></div><b>PASS</b></div></div></Panel></div>
+    <div className="two-col wide-left"><Panel title="关键里程碑" eyebrow="EVIDENCE-ATTACHED TIMELINE" action={<button className="secondary" onClick={advance} disabled={advancing}>{advancing ? "正在提交…" : "推进当前节点"}</button>}><div className="milestone-list">{order.milestones.map((item) => <article className={item.status.toLowerCase()} key={item.id}><span className="milestone-dot" /><div><h3>{item.label}</h3><p>{item.evidence}</p><small>{item.owner} · planned {item.plannedAt}{item.actualAt ? ` · actual ${item.actualAt.slice(0, 10)}` : ""}</small></div><StatusPill tone={item.status === "DONE" ? "good" : item.status === "CURRENT" ? "warn" : "neutral"}>{item.status}</StatusPill></article>)}</div></Panel>
+      <div className="workspace-stack"><Panel title="客户进度稿" eyebrow="SAFE EXTERNAL VIEW"><div className="message-card"><div className="message-to"><span>TO</span><strong>{customer.company}</strong><StatusPill tone="warn">DRAFT ONLY</StatusPill></div><p>Dear partner, your order <strong>{order.id}</strong> is progressing as planned. The latest milestone is <strong>{order.milestones.find((item) => item.status === "CURRENT")?.label}</strong>. Current estimated arrival remains <strong>{order.eta}</strong>.</p><div className="redaction-note">✓ Supplier costs, internal margin and risk notes removed</div>{runtimeMode === "fixture" ? <a className="secondary full center" href="/portal/demo-nordwerk" target="_blank">打开客户门户预览</a> : <div className="portal-safe-note"><p>共享门户使用可轮换的签名令牌；数据库不保存明文链接。</p>{portalLink ? <><a className="secondary full center" href={portalLink.url} target="_blank" rel="noreferrer">打开新签发的客户门户</a><small>有效至 {portalLink.expiresAt ? new Date(portalLink.expiresAt).toLocaleString() : "服务器策略期限"}</small><button className="secondary full" onClick={issuePortal} disabled={issuingPortal}>{issuingPortal ? "正在轮换…" : "撤销旧链接并重新签发"}</button></> : <button className="secondary full" onClick={issuePortal} disabled={issuingPortal}>{issuingPortal ? "正在签发…" : "生成 7 天门户链接"}</button>}</div>}</div></Panel><Panel title="异常雷达" eyebrow="EXCEPTION-FIRST"><div className="exception-list"><div><span className="risk-dot medium" /><div><strong>舱位缓冲缩短</strong><small>当前仍在 SLA 内，无需升级</small></div><b>WATCH</b></div><div><span className="risk-dot low" /><div><strong>质量证据完整</strong><small>AQL 夹具与箱唛记录一致</small></div><b>PASS</b></div></div></Panel></div>
     </div>
   </div>;
 }
@@ -248,11 +332,32 @@ function SuppliersView({ state, notify }: ViewProps) {
   return <div className="workspace-stack" data-testid="suppliers-view"><div className="page-intro"><div><div className="eyebrow">SUPPLIER NETWORK INTELLIGENCE</div><h1>供应商管理系统</h1><p>质量、交期、响应、可持续与在手采购单共同决定分配策略，不再只看最低价格。</p></div><button className="secondary" onClick={() => notify("供应商评分已重算：2 个采购分配建议进入草稿，未自动下单", "good")}>运行供应商再平衡</button></div><div className="supplier-grid">{state.suppliers.map((supplier) => { const composite = Math.round(supplier.qualityScore * 0.35 + supplier.deliveryScore * 0.3 + supplier.responseScore * 0.2 + supplier.sustainabilityScore * 0.15); return <article key={supplier.id}><div className="supplier-top"><div className="supplier-logo">{supplier.name.split(" ").map((word) => word[0]).slice(0, 2).join("")}</div><div><h3>{supplier.name}</h3><p>{supplier.region} · {supplier.categories.join(", ")}</p></div><StatusPill tone={supplier.risk === "LOW" ? "good" : "warn"}>{supplier.risk}</StatusPill></div><div className="supplier-score"><strong>{composite}</strong><span>COMPOSITE</span><Bar value={composite} tone={composite >= 90 ? "green" : "amber"} /></div><div className="supplier-kpis"><div><span>质量</span><b>{supplier.qualityScore}</b></div><div><span>准时</span><b>{percent(supplier.onTimeRate)}</b></div><div><span>缺陷</span><b>{percent(supplier.defectRate)}</b></div><div><span>在手 PO</span><b>{supplier.activePos}</b></div></div></article>; })}</div></div>;
 }
 
-function InventoryView({ state, setState, notify }: ViewProps) {
-  const [result, setResult] = useState<ReservationResult | null>(null);
+function InventoryView({ state, setState, notify, runtimeMode }: ViewProps) {
+  const [result, setResult] = useState<Pick<ReservationResult, "status" | "availableBefore" | "availableAfter" | "reason" | "requestId"> | null>(null);
+  const [reserving, setReserving] = useState(false);
   const appliedIds = useRef(new Set<string>());
-  const reserve = (replay: boolean) => {
+  const databaseReplay = useRef<{ requestId: string; expectedVersion: number } | null>(null);
+  const reserve = async (replay: boolean) => {
     const item = state.inventory[0];
+    if (runtimeMode === "database") {
+      setReserving(true);
+      try {
+        if (replay && !databaseReplay.current) databaseReplay.current = { requestId: `REQ-UI-${crypto.randomUUID()}`, expectedVersion: item.version };
+        const requestId = replay ? databaseReplay.current!.requestId : `REQ-UI-${crypto.randomUUID()}`;
+        const expectedVersion = replay ? databaseReplay.current!.expectedVersion : item.version;
+        const response = await fetch("/api/inventory/reserve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId, sku: item.sku, warehouseCode: item.warehouse, quantity: 25, expectedVersion }) });
+        const body = await response.json() as { status?: ReservationResult["status"] | "IDEMPOTENCY_CONFLICT" | "NOT_FOUND"; availableBefore?: number | null; availableAfter?: number | null; balanceVersion?: number | null; reason?: string; requestId?: string; error?: { message?: string } };
+        if (!body.status) throw new Error(body.error?.message ?? "Inventory reservation failed");
+        const feedback = { status: body.status === "NOT_FOUND" || body.status === "IDEMPOTENCY_CONFLICT" ? "REJECTED" as const : body.status, availableBefore: body.availableBefore ?? 0, availableAfter: body.availableAfter ?? 0, reason: body.reason ?? "Reservation processed", requestId: body.requestId ?? requestId };
+        setResult(feedback);
+        if (body.status === "RESERVED" && body.availableAfter !== null && body.availableAfter !== undefined && body.balanceVersion) {
+          setState((current) => ({ ...current, inventory: current.inventory.map((entry) => entry.sku === item.sku && entry.warehouse === item.warehouse ? { ...entry, reserved: entry.onHand - entry.safetyStock - body.availableAfter!, version: body.balanceVersion!, updatedAt: new Date().toISOString() } : entry) }));
+        }
+        notify(body.reason ?? "Reservation processed", response.ok ? "good" : "bad");
+      } catch (error) { notify(error instanceof Error ? error.message : "库存预留失败", "bad"); }
+      finally { setReserving(false); }
+      return;
+    }
     const requestId = replay ? "REQ-DEMO-IDEMPOTENT" : `REQ-${item.version}`;
     const next = reserveInventory(state.inventory, { requestId, sku: item.sku, quantity: 25, expectedVersion: replay && appliedIds.current.has(requestId) ? undefined : item.version }, appliedIds.current);
     if (next.status === "RESERVED") appliedIds.current.add(requestId);
@@ -260,9 +365,9 @@ function InventoryView({ state, setState, notify }: ViewProps) {
     if (next.status === "RESERVED") setState((current) => ({ ...current, inventory: next.inventory, events: appendEvent(current.events, { id: `EVT-${String(current.events.length + 1).padStart(4, "0")}`, tenantId: current.tenantId, at: "2026-08-09T10:45:00.000Z", actor: "Inventory Agent", action: "STOCK_RESERVED", entity: "inventory", entityId: item.sku, payload: { requestId, quantity: 25, version: item.version + 1 } }) }));
     notify(next.reason, next.status === "REJECTED" ? "bad" : "good");
   };
-  return <div className="workspace-stack" data-testid="inventory-view"><div className="page-intro"><div><div className="eyebrow">REAL-TIME DIGITAL TWIN</div><h1>供应商产品库存孪生</h1><p>在手、预留、在产、在途和安全库存统一计算；版本冲突、重复请求和超卖都会被拒绝。</p></div><div className="button-row"><button className="secondary" onClick={() => reserve(false)}>原子预留 25</button><button className="primary" onClick={() => reserve(true)}>幂等请求演练</button></div></div>
+  return <div className="workspace-stack" data-testid="inventory-view"><div className="page-intro"><div><div className="eyebrow">REAL-TIME DIGITAL TWIN</div><h1>供应商产品库存孪生</h1><p>在手、预留、在产、在途和安全库存统一计算；版本冲突、重复请求和超卖都会被拒绝。</p></div><div className="button-row"><button className="secondary" onClick={() => void reserve(false)} disabled={reserving}>原子预留 25</button><button className="primary" onClick={() => void reserve(true)} disabled={reserving}>幂等请求演练</button></div></div>
     {result ? <div className={`alert-box ${result.status === "REJECTED" ? "danger" : "success"}`}><strong>{result.status}</strong><span>{result.reason} · available {result.availableBefore} → {result.availableAfter}</span></div> : null}
-    <Panel title="实时库存矩阵" eyebrow="BROWSER JOURNAL · VERSIONED WRITES" action={<StatusPill tone="good">SYNC HEALTHY</StatusPill>}><div className="table-wrap"><table><thead><tr><th>SKU / 仓库</th><th>在手</th><th>预留</th><th>可售</th><th>在产</th><th>在途</th><th>预计可用</th><th>状态 / 版本</th></tr></thead><tbody>{state.inventory.map((item) => { const health = inventoryHealth(item); return <tr key={item.sku}><td><strong>{item.sku}</strong><small>{item.warehouse}</small></td><td>{item.onHand.toLocaleString()}</td><td>{item.reserved.toLocaleString()}</td><td><strong>{health.available.toLocaleString()}</strong><small>安全库存 {item.safetyStock}</small></td><td>{item.inProduction.toLocaleString()}</td><td>{item.inbound.toLocaleString()}</td><td>{health.projected.toLocaleString()}</td><td><StatusPill tone={health.status === "HEALTHY" ? "good" : health.status === "WATCH" ? "warn" : "bad"}>{health.status}</StatusPill><small>v{item.version}</small></td></tr>; })}</tbody></table></div></Panel>
+    <Panel title="实时库存矩阵" eyebrow={runtimeMode === "fixture" ? "BROWSER JOURNAL · VERSIONED WRITES" : "POSTGRESQL · ATOMIC WRITES"} action={<StatusPill tone="good">SYNC HEALTHY</StatusPill>}><div className="table-wrap"><table><thead><tr><th>SKU / 仓库</th><th>在手</th><th>预留</th><th>可售</th><th>在产</th><th>在途</th><th>预计可用</th><th>状态 / 版本</th></tr></thead><tbody>{state.inventory.map((item) => { const health = inventoryHealth(item); return <tr key={`${item.sku}-${item.warehouse}`}><td><strong>{item.sku}</strong><small>{item.warehouse}</small></td><td>{item.onHand.toLocaleString()}</td><td>{item.reserved.toLocaleString()}</td><td><strong>{health.available.toLocaleString()}</strong><small>安全库存 {item.safetyStock}</small></td><td>{item.inProduction.toLocaleString()}</td><td>{item.inbound.toLocaleString()}</td><td>{health.projected.toLocaleString()}</td><td><StatusPill tone={health.status === "HEALTHY" ? "good" : health.status === "WATCH" ? "warn" : "bad"}>{health.status}</StatusPill><small>v{item.version}</small></td></tr>; })}</tbody></table></div></Panel>
   </div>;
 }
 
@@ -291,19 +396,20 @@ function ComplianceView({ state, notify }: ViewProps) {
   </div>;
 }
 
-function AutomationsView({ state, setState, notify }: ViewProps) {
+function AutomationsView({ state, setState, notify, runtimeMode }: ViewProps) {
   const runControl = () => {
+    if (runtimeMode === "database") { notify("共享模式的完整控制循环由受保护 Cron 和耐久 Workflow 触发，不创建浏览器伪运行", "warn"); return; }
     const run: AutomationRun = { id: `RUN-CTRL-${state.automations.length + 1}`, name: "Full daily control loop", status: "SUCCEEDED", trigger: "MANUAL", startedAt: "2026-08-09T11:00:00.000Z", finishedAt: "2026-08-09T11:00:19.000Z", savedMinutes: 176, steps: [
       { label: "Lead radar", status: "DONE", detail: `${state.leads.length} leads evaluated` }, { label: "Risk freshness", status: "DONE", detail: `${state.dueDiligence.length} dossiers checked` }, { label: "Follow-up planner", status: "DONE", detail: `${state.customers.length} customer cadences evaluated` }, { label: "Margin and inventory", status: "DONE", detail: `${state.orders.length} orders protected` }, { label: "External action boundary", status: "DONE", detail: "0 real messages, filings or payments" },
     ] };
     setState((current) => ({ ...current, automations: [run, ...current.automations] }));
     notify("完整日常控制循环执行成功，所有外部动作保持草稿", "good");
   };
-  return <div className="workspace-stack" data-testid="automations-view"><div className="page-intro"><div><div className="eyebrow">SCHEDULED · EVENT-DRIVEN · DURABLE</div><h1>自治运行中心</h1><p>每次运行都留下触发方式、步骤、结果和节省时间；暂停不是失败，而是护栏在工作。</p></div><button className="primary" onClick={runControl}>运行完整控制循环</button></div><div className="metric-grid four"><Metric label="24h 自动运行" value={String(state.automations.length)} detail="计划、事件与手动触发" /><Metric label="节省人工" value={`${state.automations.reduce((sum, item) => sum + item.savedMinutes, 0)}m`} detail="按演示动作基准估算" tone="mint" /><Metric label="成功率" value={percent(state.automations.filter((item) => item.status === "SUCCEEDED").length / state.automations.length)} detail="HELD 计为受控暂停" /><Metric label="真实外部动作" value="0" detail="本测试策略锁定" tone="amber" /></div><div className="run-list">{state.automations.map((run) => <article key={run.id}><div className="run-head"><div className={`run-icon ${run.status.toLowerCase()}`}>{run.status === "SUCCEEDED" ? "✓" : run.status === "HELD" ? "!" : "↻"}</div><div><h3>{run.name}</h3><p>{run.id} · {run.trigger} · {run.startedAt.replace("T", " ").slice(0, 16)}</p></div><StatusPill tone={run.status === "SUCCEEDED" ? "good" : run.status === "HELD" ? "warn" : "info"}>{run.status}</StatusPill><strong>{run.savedMinutes}m saved</strong></div><div className="run-steps">{run.steps.map((step, index) => <div key={`${run.id}-${step.label}`}><span>{String(index + 1).padStart(2, "0")}</span><b>{step.label}</b><p>{step.detail}</p><StatusPill tone={step.status === "DONE" ? "good" : step.status === "HELD" ? "warn" : "neutral"}>{step.status}</StatusPill></div>)}</div></article>)}</div></div>;
+  return <div className="workspace-stack" data-testid="automations-view"><div className="page-intro"><div><div className="eyebrow">SCHEDULED · EVENT-DRIVEN · DURABLE</div><h1>自治运行中心</h1><p>每次运行都留下触发方式、步骤、结果和节省时间；暂停不是失败，而是护栏在工作。</p></div><button className="primary" onClick={runControl}>运行完整控制循环</button></div><div className="metric-grid four"><Metric label="24h 自动运行" value={String(state.automations.length)} detail="计划、事件与手动触发" /><Metric label="节省人工" value={`${state.automations.reduce((sum, item) => sum + item.savedMinutes, 0)}m`} detail="按演示动作基准估算" tone="mint" /><Metric label="成功率" value={percent(state.automations.filter((item) => item.status === "SUCCEEDED").length / Math.max(1, state.automations.length))} detail="HELD 计为受控暂停" /><Metric label="真实外部动作" value="0" detail="本测试策略锁定" tone="amber" /></div><div className="run-list">{state.automations.map((run) => <article key={run.id}><div className="run-head"><div className={`run-icon ${run.status.toLowerCase()}`}>{run.status === "SUCCEEDED" ? "✓" : run.status === "HELD" ? "!" : "↻"}</div><div><h3>{run.name}</h3><p>{run.id} · {run.trigger} · {run.startedAt.replace("T", " ").slice(0, 16)}</p></div><StatusPill tone={run.status === "SUCCEEDED" ? "good" : run.status === "HELD" ? "warn" : "info"}>{run.status}</StatusPill><strong>{run.savedMinutes}m saved</strong></div><div className="run-steps">{run.steps.map((step, index) => <div key={`${run.id}-${step.label}`}><span>{String(index + 1).padStart(2, "0")}</span><b>{step.label}</b><p>{step.detail}</p><StatusPill tone={step.status === "DONE" ? "good" : step.status === "HELD" ? "warn" : "neutral"}>{step.status}</StatusPill></div>)}</div></article>)}</div></div>;
 }
 
-function AuditView({ state, setState, notify }: ViewProps) {
-  const chain = verifyEventChain(state.events);
+function AuditView({ state, setState, notify, runtimeMode, auditLinked }: ViewProps) {
+  const chain = runtimeMode === "database" ? { valid: auditLinked, checked: state.events.length, brokenAt: auditLinked ? undefined : "database-link" } : verifyEventChain(state.events);
   const fileInput = useRef<HTMLInputElement>(null);
   const download = () => {
     const blob = new Blob([exportWorkspace(state)], { type: "application/json" });
@@ -346,11 +452,17 @@ function CommandPalette({ open, onClose, navigate }: { open: boolean; onClose: (
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><div className="command-palette" role="dialog" aria-modal="true" aria-label="快速导航" onMouseDown={(event) => event.stopPropagation()}><div className="command-input"><span>⌘</span><input autoFocus placeholder="搜索工作区…" value={query} onChange={(event) => setQuery(event.target.value)} /><kbd>ESC</kbd></div><div className="command-options">{options.map((item) => <button key={item.id} onClick={() => { navigate(item.id); onClose(); }}><span>{item.short}</span><strong>{item.label}</strong><small>{item.id}</small></button>)}</div></div></div>;
 }
 
-export default function TradeOS() {
-  const seed = useMemo(() => createSeedState(), []);
-  const [state, setState] = useState<WorkspaceState>(seed);
+export interface TradeOSProps {
+  initialState?: WorkspaceState;
+  runtimeMode: "fixture" | "database";
+  auditLinked: boolean;
+}
+
+export default function TradeOS({ initialState, runtimeMode, auditLinked }: TradeOSProps) {
+  const seed = useMemo(() => initialState ?? createSeedState(), [initialState]);
+  const [state, setState] = useState<WorkspaceState>(() => seed);
   const [view, setView] = useState<ViewId>("command");
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(runtimeMode === "database");
   const [menuOpen, setMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; tone: "good" | "warn" | "bad" } | null>(null);
@@ -365,18 +477,19 @@ export default function TradeOS() {
   const navigate = useCallback((next: ViewId) => { setView(next); setMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); }, []);
 
   useEffect(() => {
+    if (runtimeMode === "database") return;
     void loadWorkspace(seed).then((saved) => { setState(saved); setReady(true); });
     try {
       channel.current = new BroadcastChannel("meridian-10-sync");
       channel.current.onmessage = (event: MessageEvent<WorkspaceState>) => { if (event.data?.tenantId === seed.tenantId) setState(event.data); };
     } catch { channel.current = null; }
     return () => channel.current?.close();
-  }, [seed]);
+  }, [runtimeMode, seed]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || runtimeMode === "database") return;
     void saveWorkspace(state);
-  }, [ready, state]);
+  }, [ready, runtimeMode, state]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -388,6 +501,7 @@ export default function TradeOS() {
   }, []);
 
   const reset = async () => {
+    if (runtimeMode === "database") { window.location.reload(); return; }
     await clearWorkspace();
     const next = createSeedState(); setState(next); channel.current?.postMessage(next); notify("演示工作区已恢复到确定性初始状态", "good");
   };
@@ -395,15 +509,15 @@ export default function TradeOS() {
   return <div className="app-shell" data-ready={ready ? "true" : "false"}>
     <aside className={menuOpen ? "sidebar open" : "sidebar"}>
       <div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MERIDIAN <b>10</b></strong><small>AUTONOMOUS TRADE OS</small></div><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="关闭菜单">×</button></div>
-      <div className="demo-mode"><span className="pulse-dot" /><div><strong>SYNTHETIC DEMO</strong><small>外部动作：DRY-RUN</small></div></div>
+      <div className="demo-mode"><span className="pulse-dot" /><div><strong>{runtimeMode === "fixture" ? "SYNTHETIC DEMO" : "SHARED DATABASE"}</strong><small>外部动作：{runtimeMode === "fixture" ? "DRY-RUN" : "DRAFT / HELD"}</small></div></div>
       <nav aria-label="主导航">{NAV.map((group) => <div className="nav-group" key={group.group}><span>{group.group}</span>{group.items.map((item) => <button className={view === item.id ? "active" : ""} onClick={() => navigate(item.id)} key={item.id}><small>{item.short}</small><strong>{item.label}</strong>{view === item.id ? <i /> : null}</button>)}</div>)}</nav>
-      <div className="sidebar-foot"><div><span>自治度</span><strong>9.8 / 10</strong></div><Bar value={98} /><small>真实高风险动作需人工负责</small></div>
+      <div className="sidebar-foot"><div><span>自治度</span><strong>{runtimeMode === "fixture" ? "9.8" : "10.0"} / 10</strong></div><Bar value={runtimeMode === "fixture" ? 98 : 100} /><small>真实高风险动作需人工负责</small></div>
     </aside>
     {menuOpen ? <button className="sidebar-scrim" aria-label="关闭菜单" onClick={() => setMenuOpen(false)} /> : null}
     <main className="main-shell">
-      <header className="topbar"><div className="topbar-left"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="打开菜单">☰</button><div><span>MERIDIAN / {view.toUpperCase()}</span><strong>{VIEW_LABEL[view]}</strong></div></div><button className="search-button" onClick={() => setPaletteOpen(true)}><span>搜索工作区、订单、客户…</span><kbd>⌘ K</kbd></button><div className="top-actions"><div className="cloud-status"><span /><div><strong>{ready ? "LOCAL JOURNAL" : "LOADING"}</strong><small>{ready ? "已持久化" : "正在恢复"}</small></div></div><button className="icon-button" aria-label="重置演示" onClick={() => void reset()}>↺</button><div className="operator">LC</div></div></header>
-      <div className="boundary-banner"><strong>测试边界</strong><span>100% 虚构客户 · 0 次真实外联 · 0 次真实清关/支付 · 浏览器状态不冒充企业共享数据库</span><a href="#boundaries" onClick={(event) => { event.preventDefault(); navigate("compliance"); }}>查看护栏</a></div>
-      <div className="content-shell"><ViewRenderer view={view} state={state} setState={setState} notify={notify} navigate={navigate} /></div>
+      <header className="topbar"><div className="topbar-left"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="打开菜单">☰</button><div><span>MERIDIAN / {view.toUpperCase()}</span><strong>{VIEW_LABEL[view]}</strong></div></div><button className="search-button" onClick={() => setPaletteOpen(true)}><span>搜索工作区、订单、客户…</span><kbd>⌘ K</kbd></button><div className="top-actions"><div className="cloud-status"><span /><div><strong>{ready ? runtimeMode === "fixture" ? "LOCAL JOURNAL" : "POSTGRESQL" : "LOADING"}</strong><small>{ready ? runtimeMode === "fixture" ? "已持久化" : "组织数据已同步" : "正在恢复"}</small></div></div><button className="icon-button" aria-label={runtimeMode === "fixture" ? "重置演示" : "刷新共享数据"} onClick={() => void reset()}>↺</button><div className="operator">LC</div></div></header>
+      <div className="boundary-banner"><strong>{runtimeMode === "fixture" ? "测试边界" : "执行边界"}</strong><span>{runtimeMode === "fixture" ? "100% 虚构客户 · 0 次真实外联 · 0 次真实清关/支付 · 浏览器状态不冒充企业共享数据库" : "组织级权限 · PostgreSQL 原子事务 · 外联/采购/付款/清关保持 DRAFT 或 HELD"}</span><a href="#boundaries" onClick={(event) => { event.preventDefault(); navigate("compliance"); }}>查看护栏</a></div>
+      <div className="content-shell"><ViewRenderer view={view} state={state} setState={setState} notify={notify} navigate={navigate} runtimeMode={runtimeMode} auditLinked={auditLinked} /></div>
     </main>
     <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} navigate={navigate} />
     {toast ? <div className={`toast ${toast.tone}`} role="status"><span>{toast.tone === "good" ? "✓" : toast.tone === "warn" ? "!" : "×"}</span>{toast.message}</div> : null}

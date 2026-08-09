@@ -131,6 +131,11 @@ describe("public system APIs", () => {
     expect(response.status).toBe(404);
   });
 
+  it("returns 404 for an unknown document order", async () => {
+    const response = await document(new Request("http://test/api/documents/quotation?order=SO-MISSING"), { params: Promise.resolve({ type: "quotation" }) });
+    expect(response.status).toBe(404);
+  });
+
   it("protects cron when no secret is configured", async () => {
     const before = process.env.CRON_SECRET;
     delete process.env.CRON_SECRET;

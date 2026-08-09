@@ -1,0 +1,2 @@
+ALTER TABLE "organizations" ADD COLUMN "external_identity_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "organizations_external_identity_unique" ON "organizations" USING btree ("external_identity_id");
