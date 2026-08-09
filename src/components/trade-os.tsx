@@ -392,7 +392,7 @@ export default function TradeOS() {
     const next = createSeedState(); setState(next); channel.current?.postMessage(next); notify("演示工作区已恢复到确定性初始状态", "good");
   };
 
-  return <div className="app-shell">
+  return <div className="app-shell" data-ready={ready ? "true" : "false"}>
     <aside className={menuOpen ? "sidebar open" : "sidebar"}>
       <div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MERIDIAN <b>10</b></strong><small>AUTONOMOUS TRADE OS</small></div><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="关闭菜单">×</button></div>
       <div className="demo-mode"><span className="pulse-dot" /><div><strong>SYNTHETIC DEMO</strong><small>外部动作：DRY-RUN</small></div></div>
